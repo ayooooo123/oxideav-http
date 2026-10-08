@@ -14,6 +14,13 @@ keywords = ["multimedia", "http", "streaming", "io", "pure-rust"]
 categories = ["multimedia", "network-programming"]
 
 [features]
+default = ["tls"]
+# https: ureq's rustls (with ring and the webpki root certificates).
+# Without it the driver speaks plain http only: it refuses https URIs and
+# redirects to them before opening any connection, and `register` installs
+# only the `http` scheme. Players that only read from a local http server
+# turn it off with `default-features = false` and save rustls and ring.
+tls = ["ureq/rustls"]
 # Expose internal header parsers to the cargo-fuzz harness in `fuzz/`.
 # Not part of the stable surface; published consumers should leave this
 # off.
@@ -30,6 +37,6 @@ oxideav-source = "0.1"
 # representation metadata describes the coded form, so byte ranges over
 # a coded representation are useless to a demuxer). A client-side
 # auto-decompressor would consume the `Content-Encoding` evidence
-# before those checks run and redefine every byte count. `rustls` is
-# kept so https keeps working unchanged.
-ureq = { version = "3", default-features = false, features = ["rustls"] }
+# before those checks run and redefine every byte count. `rustls` comes
+# in with the `tls` feature (on by default), so https keeps working.
+ureq = { version = "3", default-features = false }

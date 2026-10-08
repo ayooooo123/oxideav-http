@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `tls` feature, on by default, carrying ureq's rustls (and with it
+  ring and the webpki root certificates). With `default-features =
+  false` the driver speaks plain http only: `register` installs only
+  `http`, and an https URI or a redirect to https is refused before
+  any connection with an error naming the feature. The live tests,
+  which use an https host, need the feature.
 - Driver-owned redirect semantics (RFC 9110 §15.4 / §10.2.2 + RFC 3986
   §5): the driver now walks 3xx chains itself — the transport layer
   returns every 3xx unfollowed — so redirects compose with the

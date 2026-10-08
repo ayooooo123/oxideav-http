@@ -2,7 +2,8 @@
 //!
 //! Off by default — set `OXIDEAV_LIVE_HTTP_TESTS=1` to enable.
 //! Skipped (with a printed note) when off so default `cargo test` does
-//! not depend on the network.
+//! not depend on the network. The host is https, so they need `tls`.
+#![cfg(feature = "tls")]
 
 use std::io::{Read, Seek, SeekFrom};
 

@@ -11,6 +11,11 @@
 //! that hold a bare [`oxideav_source::SourceRegistry`] use
 //! [`register_source`] directly.
 //!
+//! https needs the `tls` feature (on by default; rustls + ring). Built
+//! with `default-features = false` the driver speaks plain http only:
+//! only `http` registers, and an https URI or a redirect to one is
+//! refused before any connection is opened.
+//!
 //! ```no_run
 //! let mut ctx = oxideav_core::RuntimeContext::new();
 //! oxideav_http::register(&mut ctx);
@@ -121,7 +126,8 @@ use oxideav_core::{Error, Result};
 use oxideav_source::SourceRegistry;
 use ureq::Agent;
 
-/// Install the `http` + `https` schemes into a full runtime context.
+/// Install the `http` + `https` schemes into a full runtime context
+/// (`https` only with the `tls` feature).
 ///
 /// This is the unified entry point every sibling crate exposes; it
 /// just forwards to [`register_source`] on `ctx.sources`.
@@ -133,12 +139,13 @@ oxideav_core::register!("http", register);
 
 /// Register the `http` and `https` schemes on a bare
 /// [`SourceRegistry`] as bytes sources. Both schemes share the same
-/// opener (`open_http`).
+/// opener (`open_http`); `https` registers only with the `tls` feature.
 ///
 /// Most callers should use [`register`] instead — it threads through a
 /// full [`RuntimeContext`].
 pub fn register_source(registry: &mut SourceRegistry) {
     registry.register_bytes("http", open_http);
+    #[cfg(feature = "tls")]
     registry.register_bytes("https", open_http);
 }
 
@@ -599,6 +606,10 @@ fn redirect_class(status: u16) -> Option<HopKind> {
     }
 }
 
+/// Why an https request is refused in a build without the `tls` feature.
+#[cfg(not(feature = "tls"))]
+const NO_TLS: &str = "https needs oxideav-http's `tls` feature, which this build leaves out";
+
 /// Checks applied to the caller's own request URI before the first
 /// request. Userinfo is tolerated here (the URI comes from the
 /// caller, not from the network; RFC 9110 §4.2.4's SHOULD-error is
@@ -609,6 +620,10 @@ fn initial_uri_check(knobs: &HttpConfig, u: &uri::UriRef) -> std::result::Result
         return Err(format!(
             "unsupported URI scheme {scheme:?} — this driver speaks http/https only"
         ));
+    }
+    #[cfg(not(feature = "tls"))]
+    if scheme.eq_ignore_ascii_case("https") {
+        return Err(NO_TLS.to_owned());
     }
     let (_, host, _) = u.authority_parts().map_err(|e| e.to_string())?;
     if host.unwrap_or("").is_empty() {
@@ -636,6 +651,10 @@ fn hop_policy_check(
         return Err(format!(
             "redirect target {to} has scheme {to_scheme:?} — this driver speaks http/https only"
         ));
+    }
+    #[cfg(not(feature = "tls"))]
+    if to_scheme == "https" {
+        return Err(format!("redirect target {to} is https: {NO_TLS}"));
     }
     let (userinfo, host, _) = to.authority_parts().map_err(|e| e.to_string())?;
     if host.unwrap_or("").is_empty() {
@@ -4305,9 +4324,10 @@ mod tests {
             schemes.contains("http"),
             "register did not install http; got {schemes:?}"
         );
-        assert!(
+        assert_eq!(
             schemes.contains("https"),
-            "register did not install https; got {schemes:?}"
+            cfg!(feature = "tls"),
+            "https must be installed exactly when the tls feature is on; got {schemes:?}"
         );
     }
 
@@ -4317,7 +4337,7 @@ mod tests {
         register_source(&mut reg);
         let schemes: BTreeSet<&str> = reg.schemes().collect();
         assert!(schemes.contains("http"));
-        assert!(schemes.contains("https"));
+        assert_eq!(schemes.contains("https"), cfg!(feature = "tls"));
     }
 
     #[test]
@@ -8694,15 +8714,19 @@ mod tests {
         let host_pin = HttpConfig::builder().redirect_same_host_only(true).build();
         let https_only = HttpConfig::builder().https_only(true).build();
 
-        // Scheme policy matrix.
+        // Scheme policy matrix (https targets need the `tls` feature).
         assert!(hop_policy_check(&any, &u("https://h/a"), &u("http://h/b")).is_ok());
+        #[cfg(feature = "tls")]
         assert!(hop_policy_check(&upgrade, &u("http://h/a"), &u("https://h/b")).is_ok());
         assert!(hop_policy_check(&upgrade, &u("http://h/a"), &u("http://h/b")).is_ok());
         let e = hop_policy_check(&upgrade, &u("https://h/a"), &u("http://h/b")).unwrap_err();
         assert!(e.contains("UpgradeOnly"), "{e}");
-        let e = hop_policy_check(&same, &u("http://h/a"), &u("https://h/b")).unwrap_err();
-        assert!(e.contains("Same"), "{e}");
-        assert!(hop_policy_check(&same, &u("https://h/a"), &u("https://h/b")).is_ok());
+        #[cfg(feature = "tls")]
+        {
+            let e = hop_policy_check(&same, &u("http://h/a"), &u("https://h/b")).unwrap_err();
+            assert!(e.contains("Same"), "{e}");
+            assert!(hop_policy_check(&same, &u("https://h/a"), &u("https://h/b")).is_ok());
+        }
 
         // https_only refuses plain-http hops even under Any.
         let e = hop_policy_check(&https_only, &u("https://h/a"), &u("http://h/b")).unwrap_err();
@@ -9156,6 +9180,37 @@ mod tests {
             .expect("must fail");
         assert!(err.to_string().contains("https_only"), "{err}");
         assert_eq!(reqs.try_iter().count(), 0, "no request may be issued");
+    }
+
+    /// Without `tls`, an https URI is refused before any connection:
+    /// nothing reaches a listener on the target port.
+    #[cfg(not(feature = "tls"))]
+    #[test]
+    fn without_tls_https_is_refused_before_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("nonblocking");
+        let port = listener.local_addr().unwrap().port();
+        let err = HttpSource::open(&format!("https://127.0.0.1:{port}/x"))
+            .err()
+            .expect("https must fail without tls");
+        assert!(err.to_string().contains("`tls` feature"), "{err}");
+        let accepted = listener.accept();
+        assert!(
+            matches!(&accepted, Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
+            "a connection was opened: {accepted:?}"
+        );
+    }
+
+    /// Without `tls`, a redirect to https is refused as a hop, after the
+    /// one plain-http request that produced it.
+    #[cfg(not(feature = "tls"))]
+    #[test]
+    fn without_tls_a_redirect_to_https_is_refused() {
+        let (uri, reqs) = spawn_script_server(vec![redirect_bytes(302, "https://127.0.0.1:1/y")]);
+        let err = HttpSource::open(&uri).err().expect("must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("redirect target") && msg.contains("`tls` feature"), "{msg}");
+        assert_eq!(reqs.try_iter().count(), 1);
     }
 
     #[test]

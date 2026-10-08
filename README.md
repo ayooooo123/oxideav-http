@@ -27,6 +27,17 @@ let _r = ctx.sources.open("https://example.com/clip.mp4")?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+https comes from the `tls` feature (on by default: ureq's rustls, with
+ring and the webpki root certificates). A player that only reads from a
+local http server can drop all of that:
+
+```toml
+oxideav-http = { version = "0.0", default-features = false }
+```
+
+Without `tls` only `http://` registers, and an `https://` URI or a
+redirect to one fails before any connection is opened.
+
 ## Configuring the agent
 
 To tighten policy (redirect following, hop cap, cross-scheme/cross-host
