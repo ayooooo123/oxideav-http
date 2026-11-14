@@ -9,12 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `with_<field>` setters on `CacheControl` and `Challenge` (both already `Default`).
 - `tls` feature, on by default, carrying ureq's rustls (and with it
   ring and the webpki root certificates). With `default-features =
   false` the driver speaks plain http only: `register` installs only
   `http`, and an https URI or a redirect to https is refused before
   any connection with an error naming the feature. The live tests,
   which use an https host, need the feature.
+
+### Changed
+
+- API hygiene: `RedirectAuthPolicy`, `RedirectSchemePolicy`, `CacheControl` and `Challenge` are now `#[non_exhaustive]`. `RetryAfter` (the two RFC 9110 §10.2.3 forms) stays exhaustive. `uri` and `__fuzz` were already `#[doc(hidden)]`.
+
+## [0.0.9](https://github.com/OxideAV/oxideav-http/compare/v0.0.8...v0.0.9) - 2026-10-23
+
+### Other
+
+- hardware-engine crates load OS APIs through dlsym, not libloading
+- edition 2024, MSRV 1.95
+- README examples use the current registry API
+- hide internal pub surface from rustdoc/semver (fleet rule 2026-09-01)
+- redirect boundary pins + README fuzz-surface listing
+- RFC 3986 uri surfaces in the parse_headers harness
+- hostile redirect chains + CI clippy byte-str drift fix
+- driver-owned 3xx semantics — RFC 9110 §15.4/§10.2.2 hop walk over RFC 3986 §5 resolution
+- RFC 3986 URI-reference module — §5 reference resolution + §6.2.2/§6.2.3 normalization
+- RFC 9110 §10.2.3 Retry-After hint on non-success probe answers
+- RFC 9112 §7.1/§8 chunked framing composed with driver invariants
+- wire-free EOF/bounds handling + hop-walk drain test + README
+- opt-in GET range-probe fallback for HEAD-hostile servers
+- bounded forward-seek drain over the live body
+- RFC 9110 §14.2 transparent recovery from partially failed transfers
+- read path: RFC 9110 §15.3.7 span accounting + truncation surfacing
+
+### Added
+
 - Driver-owned redirect semantics (RFC 9110 §15.4 / §10.2.2 + RFC 3986
   §5): the driver now walks 3xx chains itself — the transport layer
   returns every 3xx unfollowed — so redirects compose with the
@@ -95,6 +124,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- edition 2024, MSRV 1.95
 - The HEAD path's Content-Encoding walk, Retry-After hint rendering,
   and validator + `Vary: *` stability check are now shared helpers
   reused verbatim by the probe path (`non_identity_codings_in`,

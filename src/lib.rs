@@ -171,6 +171,7 @@ pub fn open_http(uri: &str) -> Result<Box<dyn BytesSource>> {
 /// `Authorization` among the resource-specific fields to remove. Both
 /// variants therefore currently behave as [`RedirectAuthPolicy::Never`].
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum RedirectAuthPolicy {
     /// Strip `Authorization` on every redirect.
     #[default]
@@ -187,6 +188,7 @@ pub enum RedirectAuthPolicy {
 /// Independent of [`HttpConfigBuilder::https_only`], which refuses
 /// every non-`https` request outright, including the first one.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub enum RedirectSchemePolicy {
     /// `http` ↔ `https` hops are allowed in both directions (default —
     /// matches the historical transparent-following behaviour).
@@ -1353,13 +1355,13 @@ impl HttpSource {
             .get("content-length")
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse::<u64>().ok());
-        if let Some(cl) = cl {
-            if cl != span {
-                return Err(Error::other(format!(
-                    "HTTP GET probe {uri} ({why}): Content-Length {cl} != Content-Range span \
+        if let Some(cl) = cl
+            && cl != span
+        {
+            return Err(Error::other(format!(
+                "HTTP GET probe {uri} ({why}): Content-Length {cl} != Content-Range span \
                      {span} (RFC 9110 §8.6)"
-                )));
-            }
+            )));
         }
         let validator = validator_with_vary_check(&format!("HTTP GET probe {uri}"), headers)?;
         // The probe response IS the first range response — hand its
@@ -1586,16 +1588,15 @@ impl HttpSource {
         // self-descriptive and may cover less than the requested
         // open-ended range).
         let mut span = total_len - pos;
-        if status == 200 {
-            if let Some(cl) = get_content_length {
-                if cl != total_len {
-                    return Err(io::Error::other(format!(
-                        "HTTP 200 {} {}: Content-Length {cl} != HEAD-observed total {total_len} \
+        if status == 200
+            && let Some(cl) = get_content_length
+            && cl != total_len
+        {
+            return Err(io::Error::other(format!(
+                "HTTP 200 {} {}: Content-Length {cl} != HEAD-observed total {total_len} \
                          (RFC 9110 §8.6 — resource resized between HEAD and GET)",
-                        uri, range
-                    )));
-                }
-            }
+                uri, range
+            )));
         }
         if status == 206 {
             // RFC 9110 §15.3.7.2 ("A server MUST NOT generate a multipart
@@ -1661,13 +1662,13 @@ impl HttpSource {
             // complete-length, when concrete, must equal the size we
             // recorded at HEAD. A mid-stream resource resize is a
             // cache/origin mismatch we cannot recover from in-band.
-            if let Some(complete) = parsed.complete {
-                if complete != total_len {
-                    return Err(io::Error::other(format!(
-                        "HTTP 206 {} {}: Content-Range complete-length {complete} != known total {total_len}",
-                        uri, range
-                    )));
-                }
+            if let Some(complete) = parsed.complete
+                && complete != total_len
+            {
+                return Err(io::Error::other(format!(
+                    "HTTP 206 {} {}: Content-Range complete-length {complete} != known total {total_len}",
+                    uri, range
+                )));
             }
             // last-byte-pos must lie inside the representation we
             // expect.
@@ -3167,12 +3168,11 @@ fn derive_strong_validator(
     last_modified: Option<&str>,
     date: Option<&str>,
 ) -> Option<StrongValidator> {
-    if let Some(raw) = etag {
-        if let Some((is_weak, wire)) = parse_entity_tag(raw) {
-            if !is_weak {
-                return Some(StrongValidator::Etag(wire));
-            }
-        }
+    if let Some(raw) = etag
+        && let Some((is_weak, wire)) = parse_entity_tag(raw)
+        && !is_weak
+    {
+        return Some(StrongValidator::Etag(wire));
     }
     if let (Some(lm), Some(dt)) = (last_modified, date) {
         // §5.6.7 makes accepting all three HTTP-date forms a MUST on
@@ -3275,16 +3275,17 @@ fn validator_with_vary_check(
         .get("vary")
         .and_then(|v| v.to_str().ok())
         .map(normalize_obs_fold);
-    if let Some(vary_raw) = vary_owned.as_deref() {
-        if parse_vary(vary_raw) == Vary::Wildcard && validator.is_none() {
-            return Err(Error::Unsupported(format!(
-                "{ctx}: response carries 'Vary: *' (RFC 9110 §12.5.5) with no \
+    if let Some(vary_raw) = vary_owned.as_deref()
+        && parse_vary(vary_raw) == Vary::Wildcard
+        && validator.is_none()
+    {
+        return Err(Error::Unsupported(format!(
+            "{ctx}: response carries 'Vary: *' (RFC 9110 §12.5.5) with no \
                  strong validator (ETag / promotable Last-Modified) — the origin warns the \
                  representation may be selected on aspects outside the message syntax, so a \
                  later Range GET could serve a different representation the driver cannot \
                  detect (no If-Range guard per §13.1.5)"
-            )));
-        }
+        )));
     }
     Ok(validator)
 }
@@ -3505,6 +3506,7 @@ fn parse_delta_seconds(arg: &str) -> Option<u64> {
 /// valued directive (later duplicates of `max-age`, `s-maxage`, etc. are
 /// dropped). A boolean directive appearing more than once is idempotent.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CacheControl {
     /// `max-age` (§5.2.1.1 request / §5.2.2.1 response) `delta-seconds`,
     /// §1.2.2-saturated. `None` when absent or carrying a non-`1*DIGIT`
@@ -3549,6 +3551,120 @@ pub struct CacheControl {
     /// Unrecognized / extension directives (§5.2.3), preserved as
     /// `(lowercased token, optional decoded argument)` in wire order.
     pub extensions: Vec<(String, Option<String>)>,
+}
+
+impl CacheControl {
+    /// Set `max_age`.
+    #[must_use]
+    pub fn with_max_age(mut self, v: Option<u64>) -> Self {
+        self.max_age = v;
+        self
+    }
+
+    /// Set `s_maxage`.
+    #[must_use]
+    pub fn with_s_maxage(mut self, v: Option<u64>) -> Self {
+        self.s_maxage = v;
+        self
+    }
+
+    /// Set `max_stale`.
+    #[must_use]
+    pub fn with_max_stale(mut self, v: Option<Option<u64>>) -> Self {
+        self.max_stale = v;
+        self
+    }
+
+    /// Set `min_fresh`.
+    #[must_use]
+    pub fn with_min_fresh(mut self, v: Option<u64>) -> Self {
+        self.min_fresh = v;
+        self
+    }
+
+    /// Set `no_cache`.
+    #[must_use]
+    pub fn with_no_cache(mut self, v: bool) -> Self {
+        self.no_cache = v;
+        self
+    }
+
+    /// Set `no_cache_fields`.
+    #[must_use]
+    pub fn with_no_cache_fields(mut self, v: Vec<String>) -> Self {
+        self.no_cache_fields = v;
+        self
+    }
+
+    /// Set `no_store`.
+    #[must_use]
+    pub fn with_no_store(mut self, v: bool) -> Self {
+        self.no_store = v;
+        self
+    }
+
+    /// Set `no_transform`.
+    #[must_use]
+    pub fn with_no_transform(mut self, v: bool) -> Self {
+        self.no_transform = v;
+        self
+    }
+
+    /// Set `only_if_cached`.
+    #[must_use]
+    pub fn with_only_if_cached(mut self, v: bool) -> Self {
+        self.only_if_cached = v;
+        self
+    }
+
+    /// Set `must_revalidate`.
+    #[must_use]
+    pub fn with_must_revalidate(mut self, v: bool) -> Self {
+        self.must_revalidate = v;
+        self
+    }
+
+    /// Set `must_understand`.
+    #[must_use]
+    pub fn with_must_understand(mut self, v: bool) -> Self {
+        self.must_understand = v;
+        self
+    }
+
+    /// Set `private`.
+    #[must_use]
+    pub fn with_private(mut self, v: bool) -> Self {
+        self.private = v;
+        self
+    }
+
+    /// Set `private_fields`.
+    #[must_use]
+    pub fn with_private_fields(mut self, v: Vec<String>) -> Self {
+        self.private_fields = v;
+        self
+    }
+
+    /// Set `proxy_revalidate`.
+    #[must_use]
+    pub fn with_proxy_revalidate(mut self, v: bool) -> Self {
+        self.proxy_revalidate = v;
+        self
+    }
+
+    /// Set `public`.
+    #[must_use]
+    pub fn with_public(mut self, v: bool) -> Self {
+        self.public = v;
+        self
+    }
+
+    /// Set `extensions`.
+    #[must_use]
+    pub fn with_extensions(mut self, v: Vec<(String, Option<String>)>) -> Self {
+        self.extensions = v;
+        self
+    }
 }
 
 /// Parse a `Cache-Control` field value per RFC 9111 §5.2.
@@ -3646,10 +3762,10 @@ fn apply_directive(cc: &mut CacheControl, name: &str, arg: Option<String>) {
     // delta-seconds helper: first-occurrence-wins (§4.2.1) on the
     // already-populated slot.
     fn set_delta(slot: &mut Option<u64>, arg: &Option<String>) {
-        if slot.is_none() {
-            if let Some(a) = arg {
-                *slot = parse_delta_seconds(a);
-            }
+        if slot.is_none()
+            && let Some(a) = arg
+        {
+            *slot = parse_delta_seconds(a);
         }
     }
     // #field-name argument splitter for the qualified no-cache / private
@@ -3769,6 +3885,7 @@ fn split_directive_list(s: &str) -> Vec<&str> {
 /// one challenge, so [`token68`](Challenge::token68) and
 /// [`params`](Challenge::params) are never both populated.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Challenge {
     /// `auth-scheme` (§11.1) — "a case-insensitive token to identify the
     /// authentication scheme", lowercased here so `Basic` / `basic`
@@ -3786,6 +3903,29 @@ pub struct Challenge {
     /// folded). Empty when the challenge had no argument or carried a
     /// `token68`.
     pub params: Vec<(String, String)>,
+}
+
+impl Challenge {
+    /// Set `scheme`.
+    #[must_use]
+    pub fn with_scheme(mut self, v: String) -> Self {
+        self.scheme = v;
+        self
+    }
+
+    /// Set `token68`.
+    #[must_use]
+    pub fn with_token68(mut self, v: Option<String>) -> Self {
+        self.token68 = v;
+        self
+    }
+
+    /// Set `params`.
+    #[must_use]
+    pub fn with_params(mut self, v: Vec<(String, String)>) -> Self {
+        self.params = v;
+        self
+    }
 }
 
 /// Parse a `WWW-Authenticate` / `Proxy-Authenticate` field value into a
@@ -3896,12 +4036,11 @@ pub fn parse_www_authenticate(s: &str) -> Vec<Challenge> {
             // auth-params (§11.3 mutual exclusivity); in that case, and
             // when there is no current challenge at all, the orphan slot
             // is dropped.
-            if let Some(cur) = out.last_mut() {
-                if cur.token68.is_none() {
-                    if let Some(pair) = parse_one_auth_param(elem) {
-                        cur.params.push(pair);
-                    }
-                }
+            if let Some(cur) = out.last_mut()
+                && cur.token68.is_none()
+                && let Some(pair) = parse_one_auth_param(elem)
+            {
+                cur.params.push(pair);
             }
         }
     }
@@ -8708,6 +8847,9 @@ mod tests {
         let upgrade = HttpConfig::builder()
             .redirect_scheme_policy(RedirectSchemePolicy::UpgradeOnly)
             .build();
+        // `Same` only refuses a hop it can reach: without `tls` no https
+        // target survives `hop_policy_check` far enough to be judged.
+        #[cfg(feature = "tls")]
         let same = HttpConfig::builder()
             .redirect_scheme_policy(RedirectSchemePolicy::Same)
             .build();
@@ -8734,12 +8876,14 @@ mod tests {
 
         // Host pinning: case-insensitive (RFC 3986 §6.2.2.1), port
         // changes allowed, host changes refused.
-        assert!(hop_policy_check(
-            &host_pin,
-            &u("http://Host.example/a"),
-            &u("http://host.EXAMPLE/b")
-        )
-        .is_ok());
+        assert!(
+            hop_policy_check(
+                &host_pin,
+                &u("http://Host.example/a"),
+                &u("http://host.EXAMPLE/b")
+            )
+            .is_ok()
+        );
         assert!(hop_policy_check(&host_pin, &u("http://h:1/a"), &u("http://h:2/b")).is_ok());
         let e = hop_policy_check(&host_pin, &u("http://a.example/"), &u("http://b.example/"))
             .unwrap_err();
@@ -9057,12 +9201,14 @@ mod tests {
         // `Location:` with an empty value is a valid URI-reference
         // that resolves to the request URI itself (RFC 3986 §5.2.2's
         // empty-path branch) — cyclical, not followable.
-        let (uri, reqs) = spawn_script_server(vec![b"HTTP/1.1 301 Moved\r\n\
+        let (uri, reqs) = spawn_script_server(vec![
+            b"HTTP/1.1 301 Moved\r\n\
               Location: \r\n\
               Content-Length: 0\r\n\
               Connection: close\r\n\
               \r\n"
-            .to_vec()]);
+                .to_vec(),
+        ]);
         let err = HttpSource::open(&uri).err().expect("must fail");
         assert!(err.to_string().contains("cyclical"), "{err}");
         assert_eq!(reqs.try_iter().count(), 1);
@@ -9126,11 +9272,13 @@ mod tests {
         // §15.4: "If a Location header field is provided, the user
         // agent MAY automatically redirect" — without one there is
         // nothing to follow; the 3xx is the final answer.
-        let (uri, reqs) = spawn_script_server(vec![b"HTTP/1.1 301 Moved\r\n\
+        let (uri, reqs) = spawn_script_server(vec![
+            b"HTTP/1.1 301 Moved\r\n\
               Content-Length: 0\r\n\
               Connection: close\r\n\
               \r\n"
-            .to_vec()]);
+                .to_vec(),
+        ]);
         let err = HttpSource::open(&uri).err().expect("must fail");
         assert!(err.to_string().contains("status 301"), "{err}");
         assert_eq!(reqs.try_iter().count(), 1);
@@ -9141,13 +9289,15 @@ mod tests {
         // §10.2.2 note: a Location value cannot be a list; multiple
         // field lines come from an invalid message and recovery "is
         // difficult and not interoperable" — refuse rather than pick.
-        let (uri, reqs) = spawn_script_server(vec![b"HTTP/1.1 301 Moved\r\n\
+        let (uri, reqs) = spawn_script_server(vec![
+            b"HTTP/1.1 301 Moved\r\n\
               Location: /a\r\n\
               Location: /b\r\n\
               Content-Length: 0\r\n\
               Connection: close\r\n\
               \r\n"
-            .to_vec()]);
+                .to_vec(),
+        ]);
         let err = HttpSource::open(&uri).err().expect("must fail");
         assert!(err.to_string().contains("multiple"), "{err}");
         assert_eq!(
@@ -9209,7 +9359,10 @@ mod tests {
         let (uri, reqs) = spawn_script_server(vec![redirect_bytes(302, "https://127.0.0.1:1/y")]);
         let err = HttpSource::open(&uri).err().expect("must fail");
         let msg = err.to_string();
-        assert!(msg.contains("redirect target") && msg.contains("`tls` feature"), "{msg}");
+        assert!(
+            msg.contains("redirect target") && msg.contains("`tls` feature"),
+            "{msg}"
+        );
         assert_eq!(reqs.try_iter().count(), 1);
     }
 
@@ -9343,13 +9496,15 @@ mod tests {
         // The driver never sleeps, but when a 3xx surfaces (following
         // disabled) the parsed hint must ride the error so a caller
         // wiring back-off has it without re-fetching.
-        let (uri, _reqs) = spawn_script_server(vec![b"HTTP/1.1 302 Found\r\n\
+        let (uri, _reqs) = spawn_script_server(vec![
+            b"HTTP/1.1 302 Found\r\n\
               Location: /busy\r\n\
               Retry-After: 120\r\n\
               Content-Length: 0\r\n\
               Connection: close\r\n\
               \r\n"
-            .to_vec()]);
+                .to_vec(),
+        ]);
         let cfg = HttpConfig::builder().follow_redirects(false).build();
         let err = HttpSource::open_with_config(&uri, &cfg)
             .err()
